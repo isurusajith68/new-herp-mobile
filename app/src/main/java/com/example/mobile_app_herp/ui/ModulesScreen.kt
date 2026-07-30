@@ -19,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +29,7 @@ import com.example.mobile_app_herp.data.MODULE_INVENTORY
 import com.example.mobile_app_herp.data.Property
 import com.example.mobile_app_herp.data.prettifyModuleKey
 import com.example.mobile_app_herp.ui.theme.HerpType
+import kotlinx.coroutines.launch
 
 private data class ModuleTile(
     val key: String,
@@ -49,12 +51,14 @@ fun ModulesScreen(
     onOpenModule: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scope = rememberCoroutineScope()
     var tiles by remember { mutableStateOf<List<ModuleTile>?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(property.id) {
-        if (Herp.moduleTitles.isEmpty()) {
+    suspend fun load(force: Boolean = false) {
+        if (force || Herp.moduleTitles.isEmpty()) {
             Herp.moduleTitles =
-                runCatching { Herp.client.tenantModules() }.getOrDefault(emptyList())
+                runCatching { Herp.client.tenantModules() }.getOrDefault(Herp.moduleTitles)
         }
         val byKey = Herp.moduleTitles.associateBy { it.key }
         tiles = property.modules
@@ -72,33 +76,49 @@ fun ModulesScreen(
             .sortedWith(compareByDescending<ModuleTile> { it.onMobile }.thenBy { it.title.lowercase() })
     }
 
-    Column(modifier.fillMaxSize().padding(horizontal = Gutter)) {
-        Spacer(Modifier.height(16.dp))
-        TextButton(onClick = onBack, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-            Text("← ALL PROPERTIES", style = HerpType.Action, color = MaterialTheme.colorScheme.primary)
+    LaunchedEffect(property.id) { load() }
+
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        scope.launch {
+            load(force = true)
+            refreshing = false
         }
-        Spacer(Modifier.height(6.dp))
-        ScreenHeader(
-            eyebrow = property.role ?: "Property",
-            title = property.name,
-        )
+    }
 
-        Spacer(Modifier.height(22.dp))
-
-        when {
-            tiles == null -> LoadingState("Loading modules")
-
-            tiles!!.isEmpty() -> EmptyState(
-                title = "No modules granted",
-                detail = "Nobody has given this account a module at this property. " +
-                    "An administrator can grant them from Property Settings.",
+    Refreshable(refreshing = refreshing, onRefresh = ::refresh, modifier = modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().padding(horizontal = Gutter)) {
+            Spacer(Modifier.height(16.dp))
+            TextButton(
+                onClick = onBack,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+            ) {
+                Text("← ALL PROPERTIES", style = HerpType.Action, color = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.height(6.dp))
+            ScreenHeader(
+                eyebrow = property.role ?: "Property",
+                title = property.name,
             )
 
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(tiles!!, key = { it.key }) { tile ->
-                    ModuleRow(tile) { if (tile.onMobile) onOpenModule(tile.key) }
+            Spacer(Modifier.height(22.dp))
+
+            when {
+                tiles == null -> LoadingState("Loading modules")
+
+                tiles!!.isEmpty() -> EmptyState(
+                    title = "No modules granted",
+                    detail = "Nobody has given this account a module at this property. " +
+                        "An administrator can grant them from Property Settings.",
+                )
+
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(tiles!!, key = { it.key }) { tile ->
+                        ModuleRow(tile) { if (tile.onMobile) onOpenModule(tile.key) }
+                    }
+                    item { Spacer(Modifier.height(24.dp)) }
                 }
-                item { Spacer(Modifier.height(24.dp)) }
             }
         }
     }

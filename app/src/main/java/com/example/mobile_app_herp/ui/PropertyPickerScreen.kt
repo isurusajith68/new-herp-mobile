@@ -1,6 +1,8 @@
 package com.example.mobile_app_herp.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,12 +15,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,21 +30,24 @@ import com.example.mobile_app_herp.data.HerpHttpException
 import com.example.mobile_app_herp.data.Property
 import com.example.mobile_app_herp.data.Workspace
 import com.example.mobile_app_herp.ui.theme.HerpType
+import kotlinx.coroutines.launch
 
 @Composable
 fun PropertyPickerScreen(
     onPick: (Property) -> Unit,
     onSessionLost: () -> Unit,
-    onSignOut: () -> Unit,
+    onProfile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scope = rememberCoroutineScope()
     var workspace by remember { mutableStateOf<Workspace?>(null) }
+    var userName by remember { mutableStateOf<String?>(null) }
     var userEmail by remember { mutableStateOf<String?>(null) }
     var properties by remember { mutableStateOf<List<Property>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var attempt by remember { mutableStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(attempt) {
+    suspend fun load() {
         error = null
         runCatching {
             val props = Herp.client.properties()
@@ -56,6 +61,7 @@ fun PropertyPickerScreen(
         }.onSuccess { (props, ws, me) ->
             properties = props
             workspace = ws
+            userName = me?.fullName
             userEmail = me?.email ?: Herp.prefs.email
         }.onFailure {
             if (it is HerpHttpException && it.status == 401) onSessionLost()
@@ -63,37 +69,52 @@ fun PropertyPickerScreen(
         }
     }
 
-    Column(modifier.fillMaxSize().padding(horizontal = Gutter)) {
-        Spacer(Modifier.height(24.dp))
-        ScreenHeader(
-            eyebrow = "Workspace",
-            title = workspace?.name ?: Herp.prefs.slug.orEmpty(),
-            subtitle = userEmail,
-            trailing = {
-                TextButton(onClick = onSignOut) {
-                    Text("SIGN OUT", style = HerpType.Action, color = MaterialTheme.colorScheme.primary)
-                }
-            },
-        )
+    LaunchedEffect(Unit) { load() }
 
-        Spacer(Modifier.height(22.dp))
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        scope.launch {
+            load()
+            refreshing = false
+        }
+    }
 
-        when {
-            error != null -> ErrorState(error!!, onRetry = { attempt++ })
-
-            properties == null -> LoadingState("Loading properties")
-
-            properties!!.isEmpty() -> EmptyState(
-                title = "No properties yet",
-                detail = "Your account has no property access. Ask an administrator to add you, " +
-                    "then pull this screen again.",
+    Refreshable(refreshing = refreshing, onRefresh = ::refresh, modifier = modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().padding(horizontal = Gutter)) {
+            Spacer(Modifier.height(24.dp))
+            ScreenHeader(
+                eyebrow = "Workspace",
+                title = workspace?.name ?: Herp.prefs.slug.orEmpty(),
+                subtitle = userEmail,
+                // The key tag doubles as the way into your account — the same
+                // affordance that identifies a person elsewhere in the app.
+                trailing = {
+                    Box(Modifier.clickable(onClick = onProfile).padding(4.dp)) {
+                        KeyTag(userName ?: userEmail ?: "?", size = 38)
+                    }
+                },
             )
 
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(properties!!, key = { it.id }) { property ->
-                    PropertyRow(property) { onPick(property) }
+            Spacer(Modifier.height(22.dp))
+
+            when {
+                error != null -> ErrorState(error!!, onRetry = ::refresh)
+
+                properties == null -> LoadingState("Loading properties")
+
+                properties!!.isEmpty() -> EmptyState(
+                    title = "No properties yet",
+                    detail = "Your account has no property access. Ask an administrator to add " +
+                        "you, then pull down to refresh.",
+                )
+
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(properties!!, key = { it.id }) { property ->
+                        PropertyRow(property) { onPick(property) }
+                    }
+                    item { Spacer(Modifier.height(24.dp)) }
                 }
-                item { Spacer(Modifier.height(24.dp)) }
             }
         }
     }

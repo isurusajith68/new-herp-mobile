@@ -29,8 +29,10 @@ import com.example.mobile_app_herp.data.Push
 import com.example.mobile_app_herp.ui.LoginScreen
 import com.example.mobile_app_herp.ui.ModulesScreen
 import com.example.mobile_app_herp.ui.NewRequestScreen
+import com.example.mobile_app_herp.ui.ProfileScreen
 import com.example.mobile_app_herp.ui.PropertyPickerScreen
 import com.example.mobile_app_herp.ui.RequestsScreen
+import com.example.mobile_app_herp.ui.SettingsScreen
 import com.example.mobile_app_herp.ui.UpdateGate
 import com.example.mobile_app_herp.ui.theme.HerpTheme
 import kotlinx.coroutines.launch
@@ -60,6 +62,13 @@ class MainActivity : ComponentActivity() {
 private enum class PropertyScreen { MODULES, REQUESTS, NEW_REQUEST }
 
 /**
+ * Screens that sit beside the property list rather than inside a property. Kept
+ * separate because they are reachable no matter which property is selected — the
+ * account and the build are not property-scoped facts.
+ */
+private enum class AccountScreen { NONE, PROFILE, SETTINGS }
+
+/**
  * Sign in → pick a property → that property's modules → the Inventory request
  * queue. A stored session skips straight to the picker; a 401 that survives a
  * refresh attempt drops back to sign-in.
@@ -72,6 +81,7 @@ private fun HerpApp(modifier: Modifier = Modifier) {
     // Held in Herp so rotation does not bounce the user back to the picker.
     var property by remember { mutableStateOf<Property?>(Herp.selectedProperty) }
     var screen by remember { mutableStateOf(PropertyScreen.MODULES) }
+    var account by remember { mutableStateOf(AccountScreen.NONE) }
     // Bumped after a save so the list refetches instead of showing stale rows.
     var requestsVersion by remember { mutableStateOf(0) }
 
@@ -103,6 +113,7 @@ private fun HerpApp(modifier: Modifier = Modifier) {
 
     fun endSession(revokeRemotely: Boolean) {
         selectProperty(null)
+        account = AccountScreen.NONE
         Herp.reset()
         signedIn = false
         scope.launch {
@@ -120,10 +131,30 @@ private fun HerpApp(modifier: Modifier = Modifier) {
             modifier = modifier,
         )
 
+        // Account screens sit above whatever else is selected, so reaching your
+        // profile never costs you the property you were working in.
+        account == AccountScreen.PROFILE -> {
+            BackHandler { account = AccountScreen.NONE }
+            ProfileScreen(
+                onBack = { account = AccountScreen.NONE },
+                onSettings = { account = AccountScreen.SETTINGS },
+                onSignOut = { endSession(revokeRemotely = true) },
+                modifier = modifier,
+            )
+        }
+
+        account == AccountScreen.SETTINGS -> {
+            BackHandler { account = AccountScreen.PROFILE }
+            SettingsScreen(
+                onBack = { account = AccountScreen.PROFILE },
+                modifier = modifier,
+            )
+        }
+
         property == null -> PropertyPickerScreen(
             onPick = ::selectProperty,
             onSessionLost = { endSession(revokeRemotely = false) },
-            onSignOut = { endSession(revokeRemotely = true) },
+            onProfile = { account = AccountScreen.PROFILE },
             modifier = modifier,
         )
 

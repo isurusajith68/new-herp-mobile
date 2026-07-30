@@ -54,15 +54,26 @@ fun RequestsScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var playingId by remember { mutableStateOf<String?>(null) }
-    var attempt by remember { mutableStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) { onDispose { player.stop() } }
 
-    LaunchedEffect(attempt, key, property.slug) {
+    suspend fun load() {
         error = null
         runCatching { Herp.client.tasks(property.slug) }
             .onSuccess { tasks = it }
             .onFailure { error = it.message ?: "Could not load requests" }
+    }
+
+    LaunchedEffect(key, property.slug) { load() }
+
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        scope.launch {
+            load()
+            refreshing = false
+        }
     }
 
     fun play(task: Task) {
@@ -110,6 +121,9 @@ fun RequestsScreen(
     val open = tasks?.count { it.status == "pending" || it.status == "in_progress" }
 
     Box(modifier.fillMaxSize()) {
+        // The refresh container wraps only the scrolling content — a pull gesture
+        // must not drag the button that raises a new request.
+        Refreshable(refreshing = refreshing, onRefresh = ::refresh, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(horizontal = Gutter)) {
             Spacer(Modifier.height(16.dp))
             TextButton(
@@ -139,7 +153,7 @@ fun RequestsScreen(
             Spacer(Modifier.height(20.dp))
 
             when {
-                error != null -> ErrorState(error!!, onRetry = { attempt++ })
+                error != null -> ErrorState(error!!, onRetry = ::refresh)
 
                 tasks == null -> LoadingState("Loading requests")
 
@@ -162,6 +176,7 @@ fun RequestsScreen(
                     item { Spacer(Modifier.height(92.dp)) }
                 }
             }
+        }
         }
 
         ExtendedFloatingActionButton(
