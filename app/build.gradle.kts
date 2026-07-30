@@ -43,8 +43,27 @@ android {
         }
     }
 
+    /**
+     * Which deployment the app talks to. Hosts are {slug}-{module}.{domainBase},
+     * so this one string decides the API, the IdP and the address shown at login.
+     *
+     * Dev and prod are both served from this domain and separated by workspace,
+     * not by hostname — so a debug build reaches exactly the same servers as a
+     * release one. Point a build somewhere else with -PdomainBase=…
+     */
+    val domainBase = (project.findProperty("domainBase") as String?) ?: "hotel-erp.ceyinfo.com"
+
     buildTypes {
+        debug {
+            buildConfigField("String", "DOMAIN_BASE", "\"$domainBase\"")
+            // Declared, never inferred from the domain: both environments share
+            // one hostname, so comparing it could not tell them apart. This says
+            // which BUILD you are holding, which is what support needs to know.
+            buildConfigField("boolean", "IS_PRODUCTION", "false")
+        }
         release {
+            buildConfigField("String", "DOMAIN_BASE", "\"$domainBase\"")
+            buildConfigField("boolean", "IS_PRODUCTION", "true")
             optimization {
                 enable = false
             }

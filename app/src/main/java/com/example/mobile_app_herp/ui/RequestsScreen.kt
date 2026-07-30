@@ -80,6 +80,9 @@ fun RequestsScreen(
     fun refresh() {
         if (refreshing) return
         refreshing = true
+        // Notices are about the last thing you did, not about the list. Pulling to
+        // refresh is the obvious way to clear one, so it does.
+        notice = null
         scope.launch {
             load()
             refreshing = false
@@ -117,14 +120,21 @@ fun RequestsScreen(
         notice = null
         scope.launch {
             runCatching { Herp.client.transcribeTask(property.slug, task.id) }
-                .onSuccess { text ->
+                .onSuccess { spoken ->
                     transcribingId = null
                     // Patched in place so the card fills in where you are looking,
                     // instead of the list jumping under your thumb.
                     tasks = tasks?.map {
-                        if (it.id == task.id) it.copy(voiceTranscript = text) else it
+                        if (it.id == task.id) it.copy(
+                            voiceTranscript = spoken.english,
+                            voiceTranscriptOriginal = spoken.original,
+                        ) else it
                     }
-                    if (text.isBlank()) notice = "No speech in that recording — play it instead."
+                    if (spoken.isEmpty) {
+                        notice = "No speech in that recording — play it instead."
+                    } else if (!spoken.isTrustworthy) {
+                        notice = "Some of that recording wasn't clear. Play it to be sure."
+                    }
                 }
                 .onFailure {
                     transcribingId = null
@@ -354,13 +364,32 @@ private fun Ticket(
                     )
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Stamp("Voice note said", MaterialTheme.colorScheme.primary)
+                        // A transcript with [unclear] in it is labelled as such, so
+                        // nobody reads a half-heard sentence as settled fact.
+                        val gaps = task.voiceTranscript.contains("[unclear]", ignoreCase = true) ||
+                            task.voiceTranscriptOriginal?.contains("[unclear]", ignoreCase = true) == true
+                        Stamp(
+                            if (gaps) "Voice note — partly unclear" else "Voice note said",
+                            if (gaps) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary,
+                        )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             task.voiceTranscript,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // The verbatim reading, when it differs — the thing that
+                        // makes a mistranslation visible rather than invisible.
+                        val original = task.voiceTranscriptOriginal
+                        if (!original.isNullOrBlank() && original != task.voiceTranscript) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                original,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

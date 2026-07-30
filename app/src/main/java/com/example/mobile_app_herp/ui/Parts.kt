@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -112,7 +113,12 @@ fun SpineCard(
             .border(1.dp, MaterialTheme.colorScheme.outline, CardShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     ) {
-        Row {
+        // IntrinsicSize.Min is load-bearing, not tidiness. The spine has to be as
+        // tall as the content, and its fillMaxHeight() resolves against whatever
+        // the Row was given — which inside a fixed-height Column is ALL the
+        // remaining space. Without this the card swells to fill the screen and
+        // squeezes whatever follows it down to nothing.
+        Row(Modifier.height(IntrinsicSize.Min)) {
             Box(
                 Modifier
                     .width(4.dp)

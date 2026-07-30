@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.mobile_app_herp.BuildConfig
 import com.example.mobile_app_herp.data.Herp
+import com.example.mobile_app_herp.data.HerpConfig
 import com.example.mobile_app_herp.data.UpdateInfo
 import com.example.mobile_app_herp.ui.theme.HerpType
 import kotlinx.coroutines.launch
@@ -116,6 +117,14 @@ fun SettingsScreen(
                     Stamp("This build", MaterialTheme.colorScheme.onSurfaceVariant)
                     FactRow("Version", BuildConfig.VERSION_NAME)
                     FactRow("Build", BuildConfig.VERSION_CODE.toString())
+                    // Not labelled "Live / Test": both build types talk to the
+                    // same domain, so claiming one is a test server would be
+                    // false. What this says is which build you are holding.
+                    FactRow(
+                        "Build type",
+                        if (HerpConfig.isProduction) "Release" else "Debug",
+                    )
+                    FactRow("Server", HerpConfig.DOMAIN_BASE)
 
                     when (val s = state) {
                         UpdateState.Checking -> Row(

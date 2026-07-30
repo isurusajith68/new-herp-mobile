@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +47,7 @@ import com.example.mobile_app_herp.data.Assignee
 import com.example.mobile_app_herp.data.Herp
 import com.example.mobile_app_herp.data.Property
 import com.example.mobile_app_herp.data.RecordingResult
+import com.example.mobile_app_herp.data.Transcription
 import com.example.mobile_app_herp.data.VoicePlayer
 import com.example.mobile_app_herp.data.VoiceRecorder
 import com.example.mobile_app_herp.ui.theme.HerpType
@@ -488,5 +490,81 @@ fun NewRequestScreen(
         }
 
         Spacer(Modifier.height(40.dp))
+    }
+
+    review?.let { doubtful ->
+        AlertDialog(
+            onDismissRequest = { review = null },
+            shape = CardShape,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            title = {
+                Column {
+                    Text(
+                        "CHECK THIS FIRST",
+                        style = HerpType.Eyebrow,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Some of that wasn't clear",
+                        style = HerpType.Title,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        if (doubtful.hasGaps) {
+                            "[unclear] marks a word that couldn't be made out. Read it before you use it, or record again somewhere quieter."
+                        } else {
+                            "This is a rough reading. Read it before you use it, or record again somewhere quieter."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (doubtful.original.isNotBlank()) {
+                        Spacer(Modifier.height(14.dp))
+                        Stamp("Heard", MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            doubtful.original,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    if (doubtful.english.isNotBlank()) {
+                        Spacer(Modifier.height(14.dp))
+                        Stamp("In English", MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            doubtful.english,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    append(doubtful.english.ifBlank { doubtful.original })
+                    review = null
+                }) {
+                    Text("USE IT", style = HerpType.Action, color = MaterialTheme.colorScheme.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    review = null
+                    hint = "Nothing added. Record again, closer to the mic."
+                }) {
+                    Text(
+                        "DISCARD",
+                        style = HerpType.Action,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+        )
     }
 }
