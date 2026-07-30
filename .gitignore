@@ -13,3 +13,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Release signing material. Committing the keystore would hand anyone who clones
+# the repo the ability to publish updates Android accepts as genuine.
+*.keystore
+*.jks
+keystore-secrets.txt
+keystore-base64.txt
