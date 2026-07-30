@@ -90,7 +90,12 @@ fun NewRequestScreen(
     var elapsedMs by remember { mutableStateOf(0L) }
     var playing by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var hint by remember { mutableStateOf<String?>(null) }
+    // A transcription the model wasn't sure of, waiting to be read and accepted
+    // or rejected. Never written into the request box behind the user's back.
+    var review by remember { mutableStateOf<Transcription?>(null) }
 
     // A live counter is the only proof the mic is actually capturing. Without it,
     // a failed recording and a working one look identical until playback.
@@ -164,6 +169,49 @@ fun NewRequestScreen(
                 onError = { error = it },
                 onDone = { playing = false },
             )
+        }
+    }
+
+    /**
+     * Sends the recording for transcription and writes the result into the text
+     * box. It APPENDS rather than replaces: someone who typed a line and then
+     * spoke the rest should not lose the typed part, and the box stays editable
+     * so a mis-heard word can be fixed before saving.
+     */
+    fun append(spoken: String) {
+        text = if (text.isBlank()) spoken else "${text.trimEnd()} $spoken"
+    }
+
+    /**
+     * Sends the recording for transcription.
+     *
+     * A CONFIDENT result goes straight into the box — that is the whole point of
+     * dictating. Anything doubtful does not: it is held in [review] for the person
+     * to read first. Silently inserting a half-heard sentence is how someone ends
+     * up acting on a request that names the wrong item.
+     */
+    fun transcribe() {
+        val file = recorded ?: return
+        if (transcribing) return
+        transcribing = true
+        error = null
+        hint = null
+        review = null
+        scope.launch {
+            runCatching { Herp.client.transcribeVoice(property.slug, file, recorder.mimeType) }
+                .onSuccess { spoken ->
+                    transcribing = false
+                    when {
+                        spoken.isEmpty ->
+                            hint = "No speech in that recording. Try again, closer to the mic."
+                        spoken.isTrustworthy -> append(spoken.english)
+                        else -> review = spoken
+                    }
+                }
+                .onFailure {
+                    transcribing = false
+                    error = it.message ?: "Couldn't turn that recording into text"
+                }
         }
     }
 
@@ -361,15 +409,52 @@ fun NewRequestScreen(
                         }
                     }
                 }
+
+                // Turning speech into text is the reason to record at all for
+                // someone who cannot type quickly, so it gets its own full-width
+                // action rather than hiding among the playback controls.
+                if (recorded != null && !recording) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = ::transcribe,
+                        enabled = !saving && !transcribing,
+                        shape = CardShape,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (transcribing) {
+                            CircularProgressIndicator(
+                                Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "LISTENING…",
+                                style = HerpType.Action,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        } else {
+                            Text(
+                                "WRITE IT OUT FOR ME",
+                                style = HerpType.Action,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(8.dp))
                 Text(
                     when {
                         recording -> "Speak now. Tap stop when you're finished."
-                        recorded != null -> "Attached. Play it back before you save."
+                        hint != null -> hint!!
+                        recorded != null ->
+                            "Attached. Play it back, or have it written into the box above."
                         else -> "Optional. Say the detail instead of typing it."
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (hint != null) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

@@ -22,6 +22,9 @@ class HerpHttpException(val status: Int, message: String) : IOException(message)
 /** The only module raising tasks today; the queue itself is module-agnostic. */
 const val MODULE_INVENTORY = "inventory"
 
+/** DELETE still needs a body object to hand OkHttp, even an empty one. */
+private val EMPTY_BODY = ByteArray(0).toRequestBody(null, 0, 0)
+
 /**
  * Everything the app needs from the new-herp backend.
  *
@@ -255,6 +258,52 @@ class HerpClient(private val prefs: Prefs) {
             body.toString().toRequestBody(jsonType),
         )
         return parseTask(JSONObject(json))
+    }
+
+    /**
+     * Removes a request. The server allows your own unconditionally, and someone
+     * else's only for manager and above — so a 403 here is a real answer, not a
+     * misconfiguration.
+     */
+    suspend fun deleteTask(
+        propertySlug: String,
+        id: String,
+        module: String = MODULE_INVENTORY,
+    ) {
+        apiSend("/tasks/$propertySlug/$id?module=$module", "DELETE", EMPTY_BODY)
+    }
+
+    /**
+     * Reads back an existing request's voice note. The server caches the result,
+     * so the second person to tap this on the same request gets it instantly.
+     * An empty string means the recording held no speech.
+     */
+    suspend fun transcribeTask(
+        propertySlug: String,
+        id: String,
+        module: String = MODULE_INVENTORY,
+    ): Transcription = parseTranscription(
+        apiSend("/tasks/$propertySlug/$id/transcribe?module=$module", "POST", EMPTY_BODY)
+    )
+
+    /**
+     * Speech → text via Gemini, server-side. Returns an empty string when there
+     * was no speech to make out, which is a distinct outcome from a failure and
+     * the UI reports it differently.
+     */
+    suspend fun transcribeVoice(
+        propertySlug: String,
+        file: File,
+        mimeType: String,
+        module: String = MODULE_INVENTORY,
+    ): Transcription {
+        val part = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", file.name, file.asRequestBody(mimeType.toMediaType()))
+            .build()
+        return parseTranscription(
+            apiSend("/tasks/$propertySlug/transcribe?module=$module", "POST", part)
+        )
     }
 
     /**

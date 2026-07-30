@@ -1,17 +1,23 @@
 package com.example.mobile_app_herp.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,7 +60,11 @@ fun RequestsScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var playingId by remember { mutableStateOf<String?>(null) }
+    var transcribingId by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
+    // Deleting is irreversible and the button sits next to "Mark done", so it
+    // asks first — and quotes the request back so you can see which one.
+    var pendingDelete by remember { mutableStateOf<Task?>(null) }
 
     DisposableEffect(Unit) { onDispose { player.stop() } }
 
@@ -97,6 +107,47 @@ fun RequestsScreen(
                 .onFailure {
                     playingId = null
                     notice = it.message ?: "That recording wouldn't play"
+                }
+        }
+    }
+
+    fun transcribe(task: Task) {
+        if (transcribingId != null) return
+        transcribingId = task.id
+        notice = null
+        scope.launch {
+            runCatching { Herp.client.transcribeTask(property.slug, task.id) }
+                .onSuccess { text ->
+                    transcribingId = null
+                    // Patched in place so the card fills in where you are looking,
+                    // instead of the list jumping under your thumb.
+                    tasks = tasks?.map {
+                        if (it.id == task.id) it.copy(voiceTranscript = text) else it
+                    }
+                    if (text.isBlank()) notice = "No speech in that recording — play it instead."
+                }
+                .onFailure {
+                    transcribingId = null
+                    notice = it.message ?: "Couldn't read that recording"
+                }
+        }
+    }
+
+    fun deleteTask(task: Task) {
+        scope.launch {
+            runCatching { Herp.client.deleteTask(property.slug, task.id) }
+                .onSuccess {
+                    notice = null
+                    // Dropped locally rather than refetched: the row is gone, and
+                    // a full reload would flash the whole list for one removal.
+                    tasks = tasks?.filterNot { it.id == task.id }
+                }
+                .onFailure {
+                    notice = if (it is HerpHttpException && it.status == 403) {
+                        "Only a manager can delete a request someone else raised"
+                    } else {
+                        it.message ?: "That request wasn't deleted"
+                    }
                 }
         }
     }
@@ -168,8 +219,11 @@ fun RequestsScreen(
                         Ticket(
                             task = task,
                             isPlaying = playingId == task.id,
+                            isTranscribing = transcribingId == task.id,
                             onPlay = { play(task) },
+                            onTranscribe = { transcribe(task) },
                             onMarkDone = { markDone(task) },
+                            onDelete = { pendingDelete = task },
                         )
                     }
                     // Clears the button so the last ticket is never trapped.
@@ -177,6 +231,65 @@ fun RequestsScreen(
                 }
             }
         }
+        }
+
+        pendingDelete?.let { doomed ->
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                shape = CardShape,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                title = {
+                    Column {
+                        Text(
+                            "DELETE ${ticketId(doomed.id)}",
+                            style = HerpType.Eyebrow,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Delete this request?",
+                            style = HerpType.Title,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                },
+                text = {
+                    Column {
+                        Text(
+                            doomed.task,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            if (doomed.hasVoiceNote) {
+                                "The request and its voice note are removed for good."
+                            } else {
+                                "This cannot be undone."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        deleteTask(doomed)
+                        pendingDelete = null
+                    }) {
+                        Text("DELETE", style = HerpType.Action, color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDelete = null }) {
+                        Text(
+                            "KEEP IT",
+                            style = HerpType.Action,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+            )
         }
 
         ExtendedFloatingActionButton(
@@ -195,8 +308,11 @@ fun RequestsScreen(
 private fun Ticket(
     task: Task,
     isPlaying: Boolean,
+    isTranscribing: Boolean,
     onPlay: () -> Unit,
+    onTranscribe: () -> Unit,
     onMarkDone: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val tint = statusColors.of(task.status)
     val closed = task.status == "done" || task.status == "cancelled"
@@ -222,6 +338,32 @@ private fun Ticket(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+
+            // What the recording said, once someone asked. Indented behind a rule
+            // so it reads as reported speech and never as the request itself.
+            if (!task.voiceTranscript.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                // IntrinsicSize.Min lets the rule match the height of the text
+                // beside it, however many lines that turns out to be.
+                Row(Modifier.height(IntrinsicSize.Min)) {
+                    Box(
+                        Modifier
+                            .width(2.dp)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Stamp("Voice note said", MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            task.voiceTranscript,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(12.dp))
 
@@ -251,27 +393,54 @@ private fun Ticket(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            if (task.hasVoiceNote || !closed) {
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (task.hasVoiceNote) {
-                        TextButton(onClick = onPlay) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (task.hasVoiceNote) {
+                    TextButton(onClick = onPlay) {
+                        Text(
+                            if (isPlaying) "■ STOP" else "▶ PLAY",
+                            style = HerpType.Action,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                // Offered only until it has been read — afterwards the words are
+                // on the card and asking again would just cost another call.
+                if (task.canTranscribe) {
+                    TextButton(onClick = onTranscribe, enabled = !isTranscribing) {
+                        if (isTranscribing) {
+                            CircularProgressIndicator(
+                                Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        } else {
                             Text(
-                                if (isPlaying) "■ STOP" else "▶ VOICE NOTE",
+                                "READ IT",
                                 style = HerpType.Action,
                                 color = MaterialTheme.colorScheme.primary,
                             )
                         }
                     }
-                    if (!closed) {
-                        TextButton(onClick = onMarkDone) {
-                            Text(
-                                "MARK DONE",
-                                style = HerpType.Action,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                }
+                if (!closed) {
+                    TextButton(onClick = onMarkDone) {
+                        Text(
+                            "MARK DONE",
+                            style = HerpType.Action,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
+                }
+                Spacer(Modifier.weight(1f))
+                // Pushed to the far edge, away from the action you actually mean
+                // to press. Destructive work should take a deliberate reach.
+                TextButton(onClick = onDelete) {
+                    Text(
+                        "DELETE",
+                        style = HerpType.Action,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }
