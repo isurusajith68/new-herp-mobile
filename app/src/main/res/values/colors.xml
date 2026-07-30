@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors ui/theme/Color.kt. These exist as resources only because the
+         window frame is painted before Compose draws its first frame, and a
+         white flash into a dark app is the cheapest bad first impression. -->
+    <color name="enamel">#FFEDF0F3</color>
+    <color name="ink">#FF12151A</color>
+</resources>

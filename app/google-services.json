@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "317301907",
+    "project_id": "herp-hotel",
+    "storage_bucket": "herp-hotel.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:317301907:android:6006abc30e8860e8f79966",
+        "android_client_info": {
+          "package_name": "com.example.mobile_app_herp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCVubmJTZa4HL4AXPuiKcj450i3BjpjUS8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
