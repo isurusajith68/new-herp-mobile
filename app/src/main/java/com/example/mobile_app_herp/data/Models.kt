@@ -78,6 +78,53 @@ data class Transcription(
     val isTrustworthy: Boolean get() = !hasGaps && confidence >= 0.6
 }
 
+/**
+ * POST /v1/inventory/{slug}/grns/bill-ocr — the outcome of reading a bill photo.
+ *
+ * Deliberately thin. The extracted supplier, invoice number and line items are
+ * all stored server-side against [uploadId], and the desktop verify screen is
+ * where they get checked, matched to inventory items and booked in. Repeating
+ * them on a phone would invite someone to read them as settled and act on them,
+ * which is exactly the mistake a verify step exists to prevent — so the app
+ * reports only whether the read is trustworthy and sends you to the web app.
+ */
+data class BillReading(
+    val uploadId: String,
+    val confidence: Double,
+    val lineCount: Int,
+    /** The model marked at least one item it could not read. */
+    val hasUnclearLines: Boolean,
+    /** True when this exact photo had already been read — no second Gemini call. */
+    val reused: Boolean,
+) {
+    /** No usable content came back; a real bill always has item rows. */
+    val isEmpty: Boolean get() = lineCount == 0
+
+    /** Worth another photo before anyone books this in. */
+    val needsChecking: Boolean get() = confidence < 0.7 || hasUnclearLines
+}
+
+internal fun parseBillReading(json: String): BillReading {
+    val root = JSONObject(json)
+    val extracted = root.optJSONObject("extracted") ?: JSONObject()
+    val items = extracted.optJSONArray("line_items")
+    val count = items?.length() ?: 0
+    // Scanned for, not stored: the marker is the model admitting it could not read
+    // a row, and that changes the advice given even though the rows themselves
+    // are never shown here.
+    val unclear = (0 until count).any { i ->
+        items!!.getJSONObject(i).optString("description", "")
+            .contains("[unclear]", ignoreCase = true)
+    }
+    return BillReading(
+        uploadId = root.optString("uploadId", ""),
+        confidence = extracted.optDouble("confidence", 0.0),
+        lineCount = count,
+        hasUnclearLines = unclear,
+        reused = root.optBoolean("reused", false),
+    )
+}
+
 internal fun parseTranscription(json: String): Transcription = JSONObject(json).let {
     Transcription(
         original = it.optString("original", ""),

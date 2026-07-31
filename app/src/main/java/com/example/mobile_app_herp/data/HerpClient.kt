@@ -52,6 +52,17 @@ class HerpClient(private val prefs: Prefs) {
 
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
+    /**
+     * Reading a bill is one upload plus two AI passes server-side, so it
+     * routinely runs past the 30s the ordinary client allows. Its own client
+     * rather than a longer timeout everywhere: a stuck ordinary request should
+     * still give up quickly.
+     */
+    private val billHttp = http.newBuilder()
+        .writeTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .build()
+
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     /**
@@ -330,6 +341,54 @@ class HerpClient(private val prefs: Prefs) {
         val encoded = URLEncoder.encode(key, "UTF-8")
         return JSONObject(apiGet("/tasks/$propertySlug/voice-note/sign?key=$encoded"))
             .getString("url")
+    }
+
+    // ── GRN bill OCR ──────────────────────────────────────────────────────────
+
+    /**
+     * Sends a photo of a supplier bill to be read.
+     *
+     * Slow by nature — the server uploads to storage, runs a Gemini vision pass
+     * and then matches the lines against inventory items, all inside the one
+     * request. [billHttp] gives it a longer read timeout than the shared client,
+     * which would otherwise abandon a perfectly healthy call at 30 seconds.
+     */
+    suspend fun readBill(
+        propertySlug: String,
+        file: File,
+        mimeType: String = ImagePrep.MIME_TYPE,
+    ): BillReading {
+        val slug = prefs.slug ?: throw HerpHttpException(401, "Not signed in")
+        if (prefs.accessToken == null || System.currentTimeMillis() >= prefs.accessExpiresAt) {
+            if (!refresh()) throw HerpHttpException(401, "Session expired — please sign in again")
+        }
+
+        suspend fun attempt(): String = withContext(Dispatchers.IO) {
+            val part = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", file.name, file.asRequestBody(mimeType.toMediaType()))
+                .build()
+            val request = Request.Builder()
+                .url("${HerpConfig.apiOrigin(slug)}/v1/inventory/$propertySlug/grns/bill-ocr")
+                .header("Authorization", "Bearer ${prefs.accessToken}")
+                .post(part)
+                .build()
+            billHttp.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (response.isSuccessful) return@withContext body
+                throw HerpHttpException(response.code, errorMessage(response.code, body))
+            }
+        }
+
+        return parseBillReading(
+            try {
+                attempt()
+            } catch (e: HerpHttpException) {
+                if (e.status != 401) throw e
+                if (!refresh()) throw HerpHttpException(401, "Session expired — please sign in again")
+                attempt()
+            }
+        )
     }
 
     // ── Push registration ─────────────────────────────────────────────────────

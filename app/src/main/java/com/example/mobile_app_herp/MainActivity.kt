@@ -26,6 +26,8 @@ import androidx.core.content.ContextCompat
 import com.example.mobile_app_herp.data.Herp
 import com.example.mobile_app_herp.data.Property
 import com.example.mobile_app_herp.data.Push
+import com.example.mobile_app_herp.ui.BillCaptureScreen
+import com.example.mobile_app_herp.ui.InventoryScreen
 import com.example.mobile_app_herp.ui.LoginScreen
 import com.example.mobile_app_herp.ui.ModulesScreen
 import com.example.mobile_app_herp.ui.NewRequestScreen
@@ -59,7 +61,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Where inside a chosen property the user currently is. */
-private enum class PropertyScreen { MODULES, REQUESTS, NEW_REQUEST }
+private enum class PropertyScreen { MODULES, INVENTORY, REQUESTS, NEW_REQUEST, BILL }
 
 /**
  * Screens that sit beside the property list rather than inside a property. Kept
@@ -164,19 +166,39 @@ private fun HerpApp(modifier: Modifier = Modifier) {
                 ModulesScreen(
                     property = property!!,
                     onBack = { selectProperty(null) },
-                    onOpenModule = { screen = PropertyScreen.REQUESTS },
+                    onOpenModule = { screen = PropertyScreen.INVENTORY },
+                    modifier = modifier,
+                )
+            }
+
+            PropertyScreen.INVENTORY -> {
+                BackHandler { screen = PropertyScreen.MODULES }
+                InventoryScreen(
+                    property = property!!,
+                    onBack = { screen = PropertyScreen.MODULES },
+                    onRequests = { screen = PropertyScreen.REQUESTS },
+                    onUploadBill = { screen = PropertyScreen.BILL },
+                    modifier = modifier,
+                )
+            }
+
+            PropertyScreen.BILL -> {
+                BackHandler { screen = PropertyScreen.INVENTORY }
+                BillCaptureScreen(
+                    property = property!!,
+                    onBack = { screen = PropertyScreen.INVENTORY },
                     modifier = modifier,
                 )
             }
 
             PropertyScreen.REQUESTS -> {
-                BackHandler { screen = PropertyScreen.MODULES }
+                BackHandler { screen = PropertyScreen.INVENTORY }
                 RequestsScreen(
                     property = property!!,
                     // `key` forces a fresh load after a save without threading a
                     // reload callback down through the screen.
                     key = requestsVersion,
-                    onBack = { screen = PropertyScreen.MODULES },
+                    onBack = { screen = PropertyScreen.INVENTORY },
                     onNewRequest = { screen = PropertyScreen.NEW_REQUEST },
                     modifier = modifier,
                 )

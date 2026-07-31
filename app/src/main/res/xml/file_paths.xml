@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Where a captured bill photo lands before it is uploaded. Only this one
+         directory is shared, and only with the camera app we hand the URI to —
+         exporting the whole cache would expose voice notes sitting beside it. -->
+    <cache-path name="bills" path="bills/" />
+</paths>
